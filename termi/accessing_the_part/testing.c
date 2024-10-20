@@ -33,50 +33,148 @@ void print_partitionname(char * lable_name)
     }
 }
 
-int main()
+void MBR_checker(HANDLE  h, int LBA)
 {
-    HANDLE h;
-    DWORD bytes_read;
-    /*
-    HANDLE CreateFile(    
-         LPCWSTR               lpFileName,   
-         DWORD                 dwDesiredAccess,    
-         DWORD                 dwShareMode,    
-         LPSECURITY_ATTRIBUTES lpSecurityAttributes,    
-         DWORD                 dwCreationDisposition,    
-         DWORD                 dwFlagsAndAttributes,    
-         HANDLE                hTemplateFile  );  
-         */
-    char PATH[MAX_PATH] = "\\\\.\\PHYSICALDRIVE0" ;
-    h = CreateFile(PATH,GENERIC_READ,0,NULL,OPEN_EXISTING,0,NULL);
-    if (h == INVALID_HANDLE_VALUE)
-    {
-        printf("error msg : %lu",GetLastError());
-        CloseHandle(h);
-        return 1;
-    }
-    int count = 0;
-    int lable_count = 0;
-    // char lable_str[73];
-    //check into this later 
-    //issue : when declared getting an output which is randomw for each execution
-    char buffer[512];
+    printf("\nchecking MBR boot signature...\n");
     LARGE_INTEGER sector_offest;
-    int LBA;
-    //eahc LBA is of size 512
+
+    // char buffer[2];
+    //we cant directly use 2 bytes as we are using the raw data from the physical disk we have to follow some of the rules to access data
+
+    char buffer[512];
+    DWORD bytes_read;
+    sector_offest.QuadPart = 0;
+    SetFilePointerEx(h,sector_offest,NULL,FILE_BEGIN);
+    ReadFile(h,buffer,sizeof(buffer),&bytes_read,NULL);
+
+    //tester//printf("\nthis is the value of bytes read %d\n",bytes_read);
+    //tester to know if the buffer is actually getting the data nessasary
+
+    //printf("The boot signature of MBR is : %02X %02X\n",(u_char)buffer[510],(u_char)buffer[511]);
+    //tester to know which charecters are there in the boot signature area
+    if(((int)buffer[510]==85)&&((int)buffer[511]==-86))
+    {
+        //85 in hex is 55 and -86 is aa
+        printf("the boot signature is valid");
+        
+    }
+    else 
+    {
+        printf("invalid MBR boot signature has been found in the first 512 bytes");
+        exit(1);
+    }
+    nl(1); 
+}
+
+unsigned long long int extractor(char * buffer)
+{
+    unsigned long long int SLBA = 0;
+    for(int i = 0 ; i < 8 ; i ++)
+    {
+        //using to explicitly cutdown the padding 1 bits which are actually due to a padding error 
+        unsigned long long int temp = buffer[i];
+        temp = temp & (unsigned)255;
+        
+        //unsigned long long int temp = (unsigned long long int)buffer[i];
+        //reason for not using this is that when i tried to use it , the typecasting still wasnt working ans was giving wrong values 
+        //example for 0xc7
+        //since the binary value is 11000111
+        //and the sign bit here is 1 it is assuming the number is negative and is trying to padd the new bits with 1 instead of 0
+        //so when printing we are getting the wrong values 
+
+        //tester//printf("\nthe temp is %X\n",temp);
+        //using this tester to know what is the value in temp to know if the padding is done correctly or not 
+        
+        //tester// printf("%X ",(u_char)buffer[i]);
+        //using to know if the buffer is correct 
+
+        SLBA = SLBA | temp<<(i*8);
+        
+        //tester//printf("\nthe starting block is %08X\n",SLBA);
+        //using to know if the SLBA is containing the correct values in hex format
+    }
+    //tester// printf("\nthe starting block is %llu\n",SLBA);
+    //using this to know if the value printed is the correct SLBA value in decimal
+
+    return SLBA;
+    
+}
+
+
+void partition_data_printer(HANDLE h,LARGE_INTEGER sector_offest,int LBA)
+{
     // sector_offest.QuadPart =0 0th LBA(MBR);
-    // sector_offest.QuadPart =512 1st LBA(GPT);
+    // sector_offest.QuadPart =512 1st LBA(GPT header);
+    char buffer[512];
+    DWORD bytes_read;
+    
+    //helps to keep track of whether the pointer is pointing to lable byte or not
+    int lable_count =0;
+    
+    //helps to keep track of the partitions 
+    int count =0;
+
+    //helps to keep track of whether the pointer is pointing to starting LBA containing byte or not
+    int start_LBA_count = 0;
+
+
+    //using to store the SLBAS of the partition entries
+    unsigned long long int SLBA_arr[128];
     for(int j = 2; j < 34; j++)
     {
+        //helps with the storage of the lable 
         char lable_buffer[73] ;
-        BOOL flag = true;
+
+        //used to store the starting LBA of the partitions 
+        unsigned long long int SLBA;
+
+        //flag_for_lable helps with identifying the lable starting byte for each partition 
+        BOOL flag_lable = true;
+
+        //helps to find the first LBA of the partition
+        BOOL flag_partiti_startLBA = true;
+
         LBA = j;
-        sector_offest.QuadPart =512*LBA;//partition entries in 2nd LBA to 33LBA
+        sector_offest.QuadPart =512*LBA;
+        //partition entries in 2nd LBA to 33LBA
+
+        //SetFilePointerEx(HANDLE,sector_ofset,new position storer,start from)
+        //sector_offset can be given with making a long integer variable and setting the .Quadpart to be the dsired byte value 
         SetFilePointerEx(h,sector_offest,NULL,FILE_BEGIN);
         ReadFile(h,buffer,sizeof(buffer),&bytes_read,NULL);
+        printf("\nbytes read are : %d",bytes_read);
+        nl(1);
         for (size_t i = 0; i < 512 ; i++)
         {
-            if (flag == true)
+            if (flag_partiti_startLBA == true)
+            {
+                if(start_LBA_count == 32)
+                {
+                    char start_LBA[9] = {0};
+                    int l = i;
+                    for(int k = 0 ; k < 8 ; k++)
+                    {
+                        start_LBA[k] = buffer[l];
+                        l++;
+                    }
+                    start_LBA[8] ='\0';
+                    // nl(1);
+                    // printf("the starting LBA bytes start from here :");
+                    // for(int k = 0 ; k < 8 ; k++)
+                    // {
+                    //     printf("%02X ",(u_char)start_LBA[k]);
+                    // }
+                    SLBA = extractor(start_LBA);
+                    // nl(1);
+                    flag_partiti_startLBA = false;
+                    start_LBA_count = 0;
+                }
+                else
+                {
+                    start_LBA_count++;
+                }
+            }
+            if (flag_lable == true)
             {
                 
                 if(lable_count == 56)
@@ -98,7 +196,7 @@ int main()
                     // nl();
                     
                     lable_count = 0;
-                    flag = false;
+                    flag_lable = false;
                 }
                 else
                 {
@@ -112,149 +210,151 @@ int main()
             }
             if((i+1)%128 == 0)
             {
+                SLBA_arr[count]=SLBA;
                 count++;
-                flag = true;
+                flag_lable = true;
+                flag_partiti_startLBA = true;
                 printf("Above is partition %d data:",count);
                 print_partitionname(lable_buffer);
+                printf("\nThe starting block is %llu",SLBA);
                 nl(2);
 
             }
         }
         
     }
+
+    nl(1);
+    int part_num_count=0;
+    for(int i = 0 ; i < 128 ; i ++)
+    {
+        if (SLBA_arr[i]==0)
+        {
+            break;
+        }
+        part_num_count++;
+        printf("%llu ",SLBA_arr[i]);
+    }
+    // nl(1);
+    //tester// printf("%d",part_num_count);
+    //using to test if its capturing the correct number of partition entries with non zero data
+}
+int main()
+{
+
+    HANDLE h;
+    DWORD bytes_read;
+    /*
+    HANDLE CreateFile(    
+         LPCWSTR               lpFileName,   
+         DWORD                 dwDesiredAccess,    
+         DWORD                 dwShareMode,    
+         LPSECURITY_ATTRIBUTES lpSecurityAttributes,    
+         DWORD                 dwCreationDisposition,    
+         DWORD                 dwFlagsAndAttributes,    
+         HANDLE                hTemplateFile  );  
+         */
+    char PATH[MAX_PATH] = "\\\\.\\PHYSICALDRIVE0" ;
+    h = CreateFile(PATH,GENERIC_READ,0,NULL,OPEN_EXISTING,0,NULL);
+    if (h == INVALID_HANDLE_VALUE)
+    {
+        printf("error msg : %lu",GetLastError());
+        CloseHandle(h);
+        return 1;
+    }
+
+    // char lable_str[73];
+    //check into this later 
+    //issue : when declared getting an output which is random for each execution when the partition data printer was in main 
+
+    char buffer[512];
+
+    //for  setting the offset with .Quadpart
+    LARGE_INTEGER sector_offest;
+    // each LBA is of size 512
+    int LBA;
+    LBA = 0;
+
+    //will check if there is a valid MBR boot signature
+    MBR_checker(h,LBA);
+    
+    //will print the lables of the partitions present and also the data in the group descriptors 
+    partition_data_printer(h,sector_offest,LBA);
+    
+    
     CloseHandle(h);
     
     
 }
 
-
-// #include <stdio.h>
-// #include <unistd.h>
-// #include <windows.h>
-// #include <stdbool.h>
-
-// int main()
+//backup_partition_printer
 // {
-//     HANDLE h;
-//     DWORD bytes_read;
-//     /*
-//     HANDLE CreateFile(    
-//          LPCWSTR               lpFileName,   
-//          DWORD                 dwDesiredAccess,    
-//          DWORD                 dwShareMode,    
-//          LPSECURITY_ATTRIBUTES lpSecurityAttributes,    
-//          DWORD                 dwCreationDisposition,    
-//          DWORD                 dwFlagsAndAttributes,    
-//          HANDLE                hTemplateFile  );  
-//          */
-//     char PATH[MAX_PATH] = "\\\\.\\PHYSICALDRIVE0" ;
-//     h = CreateFile(PATH,GENERIC_READ,0,NULL,OPEN_EXISTING,0,NULL);
-//     if (h == INVALID_HANDLE_VALUE)
-//     {
-//         printf("error msg : %lu",GetLastError());
-//         CloseHandle(h);
-//         return 1;
-//     }
-//     int count = 0;
-//     char buffer[512];
-//     LARGE_INTEGER sector_offest;
-//     int LBA;
-//     //eahc LBA is of size 512
-//     // sector_offest.QuadPart =0 0th LBA(MBR);
-//     // sector_offest.QuadPart =512 1st LBA(GPT);
-//     for(int j = 2; j < 34; j++)
-//     {
-//         LBA = j;
-//         sector_offest.QuadPart =512*LBA;//partition entries in 2nd LBA to 33LBA
-//         SetFilePointerEx(h,sector_offest,NULL,FILE_BEGIN);
-//         ReadFile(h,buffer,sizeof(buffer),&bytes_read,NULL);
-//         for (size_t i = 0; i < 512 ; i++)
-//         {
-//             printf("%02X ", (u_char)buffer[i]);
-//             if((i+1)%16 == 0)
-//             {
-//                 printf("\n");
-//             }
-//             if((i+1)%128 == 0)
-//             {
-//                 count++;
-//                 printf("partition %d data:\n",count);
-//             }
-//         }
-        
-//     }
-//     CloseHandle(h);
-    
-    
-// }
+    // sector_offest.QuadPart =0 0th LBA(MBR);
+    // sector_offest.QuadPart =512 1st LBA(GPT);
+    // for(int j = 2; j < 34; j++)
+    // {
+    //     char lable_buffer[73] ;
+    //     BOOL flag = true;
+    //     LBA = j;
+    //     sector_offest.QuadPart =512*LBA;//partition entries in 2nd LBA to 33LBA
 
-// #include <stdio.h>
-// #include <unistd.h>
-// #include <windows.h>
-// #include <stdbool.h>
-
-// void nl()
-// {
-//     printf("\n");
-// }
-
-// int main()
-// {
-//     HANDLE h;
-//     DWORD bytes_read;
-    
-//     char PATH[MAX_PATH] = "\\\\.\\PHYSICALDRIVE0";
-//     h = CreateFile(PATH, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-//     if (h == INVALID_HANDLE_VALUE)
-//     {
-//         printf("Error message: %lu", GetLastError());
-//         CloseHandle(h);
-//         return 1;
-//     }
-    
-//     char buffer[512];
-//     LARGE_INTEGER sector_offset;
-//     int LBA;
-    
-//     for (int j = 2; j < 34; j++) // Loop through LBAs 2 to 33 (Partition Entries)
-//     {
-//         int partition_count = 0;
-//         LBA = j;
-//         sector_offset.QuadPart = 512 * LBA; // Set the offset to the current LBA
-//         SetFilePointerEx(h, sector_offset, NULL, FILE_BEGIN);
-//         ReadFile(h, buffer, sizeof(buffer), &bytes_read, NULL);
-        
-//         for (size_t i = 0; i < 512; i += 128) // Process each 128-byte partition entry
-//         {
-//             printf("Partition %d data:\n", ++partition_count);
-
-//             // Print entire partition entry for debugging (Optional)
-//             for (size_t k = i; k < i + 128; k++)
-//             {
-//                 printf("%02X ", (unsigned char)buffer[k]);
-//                 if ((k + 1) % 16 == 0) printf("\n");
-//             }
-//             nl();
-
-//             // Start reading label from the 56th byte
-//             printf("Label: ");
-//             for (int k = 56; k < 128; k += 2)
-//             {
-//                 // Combine two bytes into a UTF-16 character
-//                 unsigned char byte1 = buffer[i + k];
-//                 unsigned char byte2 = buffer[i + k + 1];
-//                 unsigned short utf16_char = (byte2 << 8) | byte1;
+    //     //SetFilePointerEx(HANDLE,sector_ofset,new position storer,start from)
+    //     //sector_offset can be given with making a long integer variable and setting the .Quadpart to be the dsired byte value 
+    //     SetFilePointerEx(h,sector_offest,NULL,FILE_BEGIN);
+    //     ReadFile(h,buffer,sizeof(buffer),&bytes_read,NULL);
+    //     printf("\nbytes read are : %d",bytes_read);
+    //     nl(1);
+    //     for (size_t i = 0; i < 512 ; i++)
+    //     {
+    //         if (flag == true)
+    //         {
                 
-//                 // Stop if null terminator
-//                 if (utf16_char == 0) break;
+    //             if(lable_count == 56)
+    //             {
+                    
+    //                 //tester to know which is the 56th byte 
+    //                 //printf("\nit is 56th byte");
+    //                 int l = i;
+    //                 for(int k = 0 ; k < 72 ; k++)
+    //                 {
+    //                     lable_buffer[k] = buffer[l++];
+    //                 }
+    //                 lable_buffer[72] = '\0';
+    //                 //tester for knowing what is in the lable_buffer
+    //                 // for(int k = 0 ; k < 72 ; k++)
+    //                 // {
+    //                 //     printf("%02X ",(unsigned char)lable_buffer[k]);
+    //                 // }
+    //                 // nl();
+                    
+    //                 lable_count = 0;
+    //                 flag = false;
+    //             }
+    //             else
+    //             {
+    //                 lable_count++;
+    //             }
+    //         }
+    //         printf("%02X ", (u_char)buffer[i]);
+    //         if((i+1)%16 == 0)
+    //         {
+    //             printf("\n");
+    //         }
+    //         if((i+1)%128 == 0)
+    //         {
+    //             count++;
+    //             flag = true;
+    //             printf("Above is partition %d data:",count);
+    //             print_partitionname(lable_buffer);
+    //             nl(2);
 
-//                 // Print character (assuming basic ASCII for simplicity)
-//                 printf("%c", (char)utf16_char);
-//             }
-//             nl();
-//         }
-//     }
-    
-//     CloseHandle(h);
-//     return 0;
+    //         }
+    //     }
+        
+    // }
 // }
+
+
+
+
+
