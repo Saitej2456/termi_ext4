@@ -100,6 +100,43 @@ unsigned long long int extractor(char * buffer)
     
 }
 
+void ext4_checker(HANDLE h, unsigned long long int * SLBA_arr, int partition_count)
+{
+    LARGE_INTEGER sector_offset;
+    int count = 0;
+    for (int i = 0; i < partition_count; i++)
+    {
+        // Calculate the offset to reach the super block(SLBA + 1024 )
+        sector_offset.QuadPart = (SLBA_arr[i] * 512) + 1024;
+
+        char buffer[1024];
+        DWORD bytes_read;
+
+        SetFilePointerEx(h, sector_offset, NULL, FILE_BEGIN);
+        ReadFile(h, buffer, sizeof(buffer), &bytes_read, NULL);
+
+        //used to print the data in the super block of size 1024
+        //tester//printf("printing the super block data of partition %d\n",i+1);
+        // for(int j = 0 ; j < 1024 ; j ++)
+        // {
+        //     printf("%02X ", (u_char)buffer[j]);
+            
+        //     if((j+1)%16 == 0)
+        //     {
+        //         printf("\n");
+        //     }
+        // }
+
+        // Print the magic number in correct order (little-endian)
+        //tester printf("Number found partition %d in Magic number offset: %02X%02X\n", i+1, (u_char)buffer[57], (u_char)buffer[56]);
+        //used to check the values of the partitions at magic number offset 
+        if (((u_char)buffer[57]==239)&&((u_char)buffer[56]==83))
+        {
+            printf("This partition %d is an Ext4 partition as it has the magic numeber is 0XEF53",i+1);
+            nl(1);
+        }
+    }
+}
 
 void partition_data_printer(HANDLE h,LARGE_INTEGER sector_offest,int LBA)
 {
@@ -225,6 +262,8 @@ void partition_data_printer(HANDLE h,LARGE_INTEGER sector_offest,int LBA)
     }
 
     nl(1);
+
+    //gives the number of partitions which are there in system
     int part_num_count=0;
     for(int i = 0 ; i < 128 ; i ++)
     {
@@ -233,12 +272,18 @@ void partition_data_printer(HANDLE h,LARGE_INTEGER sector_offest,int LBA)
             break;
         }
         part_num_count++;
-        printf("%llu ",SLBA_arr[i]);
+        //tester printf("%llu ",SLBA_arr[i]);
+        //tester to know if the stored SLBA values are correct 
     }
-    // nl(1);
+    nl(1);
     //tester// printf("%d",part_num_count);
     //using to test if its capturing the correct number of partition entries with non zero data
+    
+    ext4_checker(h,SLBA_arr,part_num_count);
+    
 }
+
+
 int main()
 {
 
